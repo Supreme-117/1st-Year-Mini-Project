@@ -1,0 +1,100 @@
+#include <Wire.h>
+#include <Adafruit_MPU6050.h>
+#include <Adafruit_Sensor.h>
+#include <BluetoothSerial.h>
+#include <ESP32Servo.h>
+
+Adafruit_MPU6050 mpu;
+BluetoothSerial SerialBT;
+
+Servo rudder;       // Servo for rudder (Yaw)
+Servo leftAileron;  // Servo for left aileron (Roll)
+Servo rightAileron; // Servo for right aileron (Roll)
+Servo elevator;     // Servo for elevator (Pitch)
+
+// Receiver channel pins
+const int ch1Pin = 34; // Aileron 1
+const int ch2Pin = 35; // Elevator
+const int ch4Pin = 27; // Rudder
+const int ch5Pin = 14; // Mode switch
+const int ch6Pin = 12; // Aileron 2
+
+// Variables to store receiver inputs
+int ch1, ch2, ch4, ch5, ch6;
+
+void setup() {
+  Serial.begin(115200);
+  if (!mpu.begin()) {
+    Serial.println("Failed to find MPU6050 chip");
+     SerialBT.println("Failed to find MPU6050 chip");
+    while (1) {
+      delay(10);
+    }
+  }
+
+  // Set up Bluetooth Serial
+  SerialBT.begin("ESP32_BT");
+
+  mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
+  mpu.setGyroRange(MPU6050_RANGE_250_DEG);
+
+  // Attach servos
+  rudder.attach(32);       // GPIO 32
+  leftAileron.attach(33);  // GPIO 33
+  rightAileron.attach(25); // GPIO 25
+  elevator.attach(26);     // GPIO 26
+
+  // Set receiver channel pins as inputs
+  pinMode(ch1Pin, INPUT);
+  pinMode(ch2Pin, INPUT);
+  pinMode(ch4Pin, INPUT);
+  pinMode(ch5Pin, INPUT);
+  pinMode(ch6Pin, INPUT);
+}
+
+void loop() {
+  // Read receiver inputs
+  ch1 = pulseIn(ch1Pin, HIGH);
+  ch2 = pulseIn(ch2Pin, HIGH);
+  ch4 = pulseIn(ch4Pin, HIGH);
+  ch5 = pulseIn(ch5Pin, HIGH);
+  ch6 = pulseIn(ch6Pin, HIGH);
+
+  // Check mode switch (assume channel 5 > 1500 for stabilization mode)
+  bool stabilizationMode = (ch5 > 1500);
+
+  if (stabilizationMode) {
+    // Stabilization mode
+    sensors_event_t accel, gyro, temp;
+    mpu.getEvent(&accel, &gyro, &temp);
+
+    // Convert gyroscope data to angles
+    double pitch = gyro.gyro.x * 180 / PI;
+    double roll = gyro.gyro.y * 180 / PI;
+    double yaw = gyro.gyro.z * 180 / PI;
+
+    // Send data over Bluetooth
+    SerialBT.print("Pitch: "); SerialBT.print(pitch);
+    SerialBT.print(" Roll: "); SerialBT.print(roll);
+    SerialBT.print(" Yaw: "); SerialBT.print(yaw);
+    SerialBT.println();
+    Serial.print("Pitch: "); Serial.print(pitch);
+    Serial.print(" Roll: "); Serial.print(roll);
+    Serial.print(" Yaw: "); Serial.print(yaw);
+    SerialBT.println();
+
+    // Control servos based on stabilization logic (example, adjust as needed)
+    rudder.write(map(yaw, -90, 90, 0, 180));
+    leftAileron.write(map(roll, -90, 90, 0, 180));
+    rightAileron.write(map(roll, -90, 90, 0, 180));
+    elevator.write(map(pitch, -90, 90, 0, 180));
+  } else {
+    // Full manual mode
+    rudder.write(map(ch4, 1000, 2000, 0, 180));
+    leftAileron.write(map(ch1, 1000, 2000, 0, 180));
+    rightAileron.write(map(ch6, 1000, 2000, 0, 180));
+    elevator.write(map(ch2, 1000, 2000, 0, 180));
+  }
+
+  delay(20); // Adjust delay as necessary
+}
